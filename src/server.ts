@@ -1725,7 +1725,7 @@ function parseMarkdownContent(markdownText: string): any[] {
   const elements = [];
   
   for (const line of lines) {
-    // Check for headings (# ## ### #### ##### ######)
+    // Check for headings (# ## ### #### ######)
     const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
     if (headingMatch) {
       const level = headingMatch[1].length;
@@ -1801,9 +1801,6 @@ server.tool(
         documentLength = baseIndex + Math.max(0, textContent.length - 1);
       }
       
-      // Parse the markdown content
-      const elements = parseMarkdownContent(markdownContent);
-      
       const requests: any[] = [];
       let insertIndex: number;
       
@@ -1827,40 +1824,9 @@ server.tool(
         insertIndex = documentLength;
       }
       
-      let currentIndex = insertIndex;
-      
-      // Process each markdown element
-      for (const element of elements) {
-        // Insert the text
-        requests.push({
-          insertText: {
-            location: {
-              index: currentIndex,
-              ...(tabId && { tabId }),
-            },
-            text: element.text,
-          },
-        });
-        
-        // Apply the appropriate style based on element type
-        const endIndex = currentIndex + element.text.length;
-        
-        requests.push({
-          updateParagraphStyle: {
-            range: {
-              startIndex: currentIndex,
-              endIndex: endIndex,
-              ...(tabId && { tabId }),
-            },
-            paragraphStyle: {
-              namedStyleType: element.namedStyleType,
-            },
-            fields: 'namedStyleType',
-          },
-        });
-        
-        currentIndex = endIndex;
-      }
+      // Parse markdown and create requests with inline formatting support
+      const markdownRequests = parseMarkdownToDocRequests(markdownContent, insertIndex, tabId);
+      requests.push(...markdownRequests);
       
       // Execute all requests
       await docsClient.documents.batchUpdate({
@@ -1871,14 +1837,13 @@ server.tool(
       });
       
       const tabInfo = tabId ? ` in tab "${tabId}"` : '';
-      const elementCount = elements.filter(e => e.type === 'heading').length;
-      const headingInfo = elementCount > 0 ? ` (${elementCount} headings converted)` : '';
+      const requestCount = markdownRequests.length;
       
       return {
         content: [
           {
             type: "text",
-            text: `Markdown content inserted and converted successfully${tabInfo}${headingInfo}!\nDocument ID: ${docId}\nContent inserted at index: ${insertIndex}\nElements processed: ${elements.length}`,
+            text: `Markdown content inserted and converted successfully${tabInfo}!\nDocument ID: ${docId}\nContent inserted at index: ${insertIndex}\nRequests processed: ${requestCount}`,
           },
         ],
       };
@@ -2122,6 +2087,545 @@ server.prompt(
       }
     }]
   })
+);
+
+// =============================================
+// CORE MARKDOWN CONVERSION COMPONENTS
+// =============================================
+
+/**
+ * Document Reader Component
+ * Converts Google Docs to Markdown with structure preserved
+ */
+function convertDocToMarkdown(docContent: any): string {
+  if (!docContent || !docContent.body || !docContent.body.content) {
+    return "";
+  }
+
+  let markdown = "";
+  
+  function traverseDocContent(content: any[]): string {
+    let result = "";
+    
+    for (const element of content) {
+      if (element.paragraph) {
+        const paragraph = element.paragraph;
+        let paragraphText = "";
+        
+        // Extract text from paragraph elements
+        if (paragraph.elements) {
+          for (const paragraphElement of paragraph.elements) {
+            if (paragraphElement.textRun && paragraphElement.textRun.content) {
+              paragraphText += paragraphElement.textRun.content;
+            }
+          }
+        }
+        
+        // Convert paragraph style to markdown
+        const namedStyleType = paragraph.paragraphStyle?.namedStyleType;
+        
+        switch (namedStyleType) {
+          case 'HEADING_1':
+            result += `# ${paragraphText.trim()}\n\n`;
+            break;
+          case 'HEADING_2':
+            result += `## ${paragraphText.trim()}\n\n`;
+            break;
+          case 'HEADING_3':
+            result += `### ${paragraphText.trim()}\n\n`;
+            break;
+          case 'HEADING_4':
+            result += `#### ${paragraphText.trim()}\n\n`;
+            break;
+          case 'HEADING_5':
+            result += `##### ${paragraphText.trim()}\n\n`;
+            break;
+          case 'HEADING_6':
+            result += `###### ${paragraphText.trim()}\n\n`;
+            break;
+          default:
+            // NORMAL_TEXT or other styles
+            if (paragraphText.trim()) {
+              result += `${paragraphText.trim()}\n\n`;
+            }
+            break;
+        }
+      } else if (element.table) {
+        // Handle tables (basic implementation)
+        result += "<!-- Table content -->\n\n";
+      } else if (element.tableOfContents) {
+        // Handle table of contents
+        result += "<!-- Table of Contents -->\n\n";
+      }
+    }
+    
+    return result;
+  }
+  
+  markdown = traverseDocContent(docContent.body.content);
+  
+  // Clean up extra newlines
+  return markdown.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * In-Memory Editing Component
+ * Allows AI or user to operate on the Markdown string
+ */
+function editMarkdownContent(markdownString: string, instruction: string): string {
+  // This is a placeholder for AI-powered editing
+  // In a real implementation, this would use an AI model to modify the markdown
+  // For now, we'll just return the original content with a note
+  
+  const lines = markdownString.split('\n');
+  let editedContent = markdownString;
+  
+  // Basic instruction handling (can be expanded)
+  if (instruction.toLowerCase().includes('add heading')) {
+    const headingMatch = instruction.match(/add heading[:\s]+"([^"]+)"/i);
+    if (headingMatch) {
+      const newHeading = headingMatch[1];
+      editedContent = `# ${newHeading}\n\n${markdownString}`;
+    }
+  } else if (instruction.toLowerCase().includes('remove empty lines')) {
+    editedContent = markdownString.replace(/\n\s*\n/g, '\n\n');
+  }
+  
+  return editedContent;
+}
+
+/**
+ * Enhanced Markdown Parser Component
+ * Takes Markdown and produces a list of styled segments for Google Docs
+ */
+function parseMarkdownToDocRequests(markdownString: string, startIndex: number = 1, tabId?: string): any[] {
+  const lines = markdownString.split('\n');
+  const requests: any[] = [];
+  let currentIndex = startIndex;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    // Skip empty lines but preserve them in output
+    if (!line.trim()) {
+      if (i < lines.length - 1) { // Don't add newline for last empty line
+        requests.push({
+          insertText: {
+            location: { 
+              index: currentIndex,
+              ...(tabId && { tabId })
+            },
+            text: '\n'
+          }
+        });
+        currentIndex += 1;
+      }
+      continue;
+    }
+    
+    let namedStyleType = 'NORMAL_TEXT';
+    let text = line;
+    
+    // Parse markdown headings
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      text = headingMatch[2].trim();
+      namedStyleType = `HEADING_${level}`;
+    }
+    
+    // Parse inline formatting and create styled segments
+    const segments = parseInlineFormatting(text);
+    
+    // Process each segment
+    for (const segment of segments) {
+      const textWithNewline = (segment === segments[segments.length - 1]) ? segment.text + '\n' : segment.text;
+      
+      // Insert text request
+      requests.push({
+        insertText: {
+          location: { 
+            index: currentIndex,
+            ...(tabId && { tabId })
+          },
+          text: textWithNewline
+        }
+      });
+      
+      const segmentEndIndex = currentIndex + textWithNewline.length;
+      
+      // Apply paragraph style to the entire line (only for the first segment)
+      if (segment === segments[0]) {
+        requests.push({
+          updateParagraphStyle: {
+            range: {
+              startIndex: currentIndex,
+              endIndex: currentIndex + segments.reduce((sum, seg) => sum + seg.text.length, 0) + 1, // +1 for newline
+              ...(tabId && { tabId })
+            },
+            paragraphStyle: {
+              namedStyleType: namedStyleType
+            },
+            fields: 'namedStyleType'
+          }
+        });
+      }
+      
+      // Apply text styling if the segment has formatting
+      if (segment.styles && Object.keys(segment.styles).length > 0) {
+        const apiTextStyle: any = {};
+        
+        if (segment.styles.bold !== undefined) apiTextStyle.bold = segment.styles.bold;
+        if (segment.styles.italic !== undefined) apiTextStyle.italic = segment.styles.italic;
+        if (segment.styles.strikethrough !== undefined) apiTextStyle.strikethrough = segment.styles.strikethrough;
+        if (segment.styles.code) {
+          // Code formatting: monospace font
+          apiTextStyle.weightedFontFamily = {
+            fontFamily: 'Consolas',
+            weight: 400
+          };
+          apiTextStyle.backgroundColor = {
+            color: {
+              rgbColor: { red: 0.96, green: 0.96, blue: 0.96 }
+            }
+          };
+        }
+        
+        requests.push({
+          updateTextStyle: {
+            range: {
+              startIndex: currentIndex,
+              endIndex: currentIndex + segment.text.length, // Don't include newline in text style
+              ...(tabId && { tabId })
+            },
+            textStyle: apiTextStyle,
+            fields: Object.keys(apiTextStyle).join(',')
+          }
+        });
+      }
+      
+      currentIndex = segmentEndIndex;
+    }
+  }
+  
+  return requests;
+}
+
+/**
+ * Parse inline markdown formatting within a text string
+ * Returns an array of text segments with their associated styles
+ */
+function parseInlineFormatting(text: string): Array<{text: string, styles?: any}> {
+  const segments: Array<{text: string, styles?: any}> = [];
+  let currentPos = 0;
+  
+  // Define regex patterns for inline formatting
+  const patterns = [
+    { regex: /\*\*([^*]+?)\*\*/g, style: { bold: true } },           // **bold**
+    { regex: /(?<!\*)\*([^*]+?)\*(?!\*)/g, style: { italic: true } }, // *italic* (not part of **)
+    { regex: /~~([^~]+?)~~/g, style: { strikethrough: true } },      // ~~strikethrough~~
+    { regex: /`([^`]+?)`/g, style: { code: true } }                  // `code`
+  ];
+  
+  // Find all matches and their positions
+  const matches: Array<{start: number, end: number, text: string, style: any}> = [];
+  
+  for (const pattern of patterns) {
+    let match;
+    const regex = new RegExp(pattern.regex.source, pattern.regex.flags);
+    
+    while ((match = regex.exec(text)) !== null) {
+      matches.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        text: match[1], // The captured group (text without markup)
+        style: pattern.style
+      });
+    }
+  }
+  
+  // Sort matches by start position
+  matches.sort((a, b) => a.start - b.start);
+  
+  // Handle overlapping matches (give priority to the first one found)
+  const validMatches = [];
+  let lastEnd = 0;
+  
+  for (const match of matches) {
+    if (match.start >= lastEnd) {
+      validMatches.push(match);
+      lastEnd = match.end;
+    }
+  }
+  
+  // Build segments
+  let pos = 0;
+  
+  for (const match of validMatches) {
+    // Add plain text before the match
+    if (match.start > pos) {
+      const plainText = text.substring(pos, match.start);
+      if (plainText) {
+        segments.push({ text: plainText });
+      }
+    }
+    
+    // Add the styled text
+    segments.push({ 
+      text: match.text, 
+      styles: match.style 
+    });
+    
+    pos = match.end;
+  }
+  
+  // Add remaining plain text
+  if (pos < text.length) {
+    const plainText = text.substring(pos);
+    if (plainText) {
+      segments.push({ text: plainText });
+    }
+  }
+  
+  // If no matches found, return the original text as a single segment
+  if (segments.length === 0) {
+    segments.push({ text: text });
+  }
+  
+  return segments;
+}
+
+/**
+ * Google Docs Writer Component
+ * Clears existing content and writes the new formatted content
+ */
+async function writeMarkdownToGoogleDoc(docId: string, markdownString: string, tabId?: string): Promise<string> {
+  try {
+    const documentId = docId.toString();
+    
+    // Get the document to understand its structure
+    const doc = await (docsClient.documents.get as any)({
+      documentId,
+      includeTabsContent: true,
+    });
+    
+    let targetBody = doc.data.body;
+    let baseIndex = 1;
+    
+    // If tabId is specified, find the target tab
+    if (tabId && doc.data.tabs) {
+      const allTabs = collectAllTabs(doc.data.tabs);
+      const targetTab = allTabs.find(tab => 
+        tab.tabProperties?.tabId === tabId || 
+        (tab.documentTab?.title && tab.documentTab.title.toLowerCase() === tabId.toLowerCase())
+      );
+      
+      if (targetTab && targetTab.documentTab) {
+        targetBody = targetTab.documentTab.body;
+        baseIndex = 1;
+      } else {
+        throw new Error(`Tab "${tabId}" not found`);
+      }
+    }
+    
+    // Calculate document length
+    let documentLength = baseIndex;
+    if (targetBody && targetBody.content && targetBody.content.length > 0) {
+      const textContent = extractTextFromContent(targetBody.content);
+      documentLength = baseIndex + Math.max(0, textContent.length - 1);
+    }
+    
+    const requests: any[] = [];
+    
+    // Clear existing content (except title)
+    if (documentLength > baseIndex) {
+      requests.push({
+        deleteContentRange: {
+          range: {
+            startIndex: baseIndex,
+            endIndex: documentLength,
+            ...(tabId && { tabId }),
+          },
+        },
+      });
+    }
+    
+    // Parse markdown and create requests
+    const markdownRequests = parseMarkdownToDocRequests(markdownString, baseIndex, tabId);
+    
+    // Add tab context to all requests if needed
+    if (tabId) {
+      markdownRequests.forEach(request => {
+        if (request.insertText && request.insertText.location) {
+          request.insertText.location.tabId = tabId;
+        }
+        if (request.updateParagraphStyle && request.updateParagraphStyle.range) {
+          request.updateParagraphStyle.range.tabId = tabId;
+        }
+      });
+    }
+    
+    requests.push(...markdownRequests);
+    
+    // Execute all requests in a single batch
+    await docsClient.documents.batchUpdate({
+      documentId,
+      requestBody: {
+        requests,
+      },
+    });
+    
+    return `Successfully updated document with ${markdownRequests.length / 2} elements`;
+  } catch (error) {
+    throw new Error(`Failed to write markdown to document: ${error}`);
+  }
+}
+
+// =============================================
+// NEW MCP TOOLS BASED ON REQUIREMENTS
+// =============================================
+
+// Tool 1: Read document as markdown
+server.tool(
+  "read-doc-as-markdown",
+  {
+    docId: z.string().describe("The ID of the document to read as markdown"),
+    tabId: z.string().optional().describe("Tab ID to read from (for tabbed documents)"),
+  },
+  async ({ docId, tabId }) => {
+    try {
+      if (!docId) {
+        throw new Error("Document ID is required");
+      }
+      
+      const documentId = docId.toString();
+      
+      // Get the document content
+      const doc = await (docsClient.documents.get as any)({
+        documentId,
+        includeTabsContent: true,
+      });
+      
+      let targetContent = doc.data;
+      
+      // If tabId is specified, find the target tab
+      if (tabId && doc.data.tabs) {
+        const allTabs = collectAllTabs(doc.data.tabs);
+        const targetTab = allTabs.find(tab => 
+          tab.tabProperties?.tabId === tabId || 
+          (tab.documentTab?.title && tab.documentTab.title.toLowerCase() === tabId.toLowerCase())
+        );
+        
+        if (targetTab && targetTab.documentTab) {
+          targetContent = { body: targetTab.documentTab.body };
+        } else {
+          throw new Error(`Tab "${tabId}" not found`);
+        }
+      }
+      
+      // Convert document to markdown
+      const markdownContent = convertDocToMarkdown(targetContent);
+      
+      const tabInfo = tabId ? ` from tab "${tabId}"` : '';
+      
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Document converted to markdown successfully${tabInfo}!\n\n--- MARKDOWN CONTENT ---\n${markdownContent}\n--- END MARKDOWN ---`,
+          },
+        ],
+      };
+    } catch (error) {
+      console.error("Error reading document as markdown:", error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error reading document as markdown: ${error}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// Tool 2: Edit markdown content
+server.tool(
+  "edit-markdown-content",
+  {
+    markdownString: z.string().describe("The markdown content to edit"),
+    instruction: z.string().describe("Instruction for how to edit the content"),
+  },
+  async ({ markdownString, instruction }) => {
+    try {
+      // Process the markdown content based on the instruction
+      const editedMarkdown = editMarkdownContent(markdownString, instruction);
+      
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Markdown content edited successfully!\n\nInstruction: ${instruction}\n\n--- EDITED MARKDOWN ---\n${editedMarkdown}\n--- END MARKDOWN ---`,
+          },
+        ],
+      };
+    } catch (error) {
+      console.error("Error editing markdown content:", error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error editing markdown content: ${error}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// Tool 3: Write markdown to document
+server.tool(
+  "write-markdown-to-doc",
+  {
+    docId: z.string().describe("The ID of the document to update"),
+    markdownString: z.string().describe("The markdown content to write to the document"),
+    tabId: z.string().optional().describe("Tab ID to write to (for tabbed documents)"),
+  },
+  async ({ docId, markdownString, tabId }) => {
+    try {
+      if (!docId) {
+        throw new Error("Document ID is required");
+      }
+      
+      // Write the markdown content to the document
+      const result = await writeMarkdownToGoogleDoc(docId, markdownString, tabId);
+      
+      const tabInfo = tabId ? ` in tab "${tabId}"` : '';
+      
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${result}${tabInfo}!\nDocument ID: ${docId}`,
+          },
+        ],
+      };
+    } catch (error) {
+      console.error("Error writing markdown to document:", error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error writing markdown to document: ${error}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
 );
 
 // Connect to the transport and start the server

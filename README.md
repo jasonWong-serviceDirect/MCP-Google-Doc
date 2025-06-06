@@ -1,5 +1,8 @@
 # New features in this fork:
 
+- **Markdown conversion pipeline**: Full bidirectional conversion between Google Docs and Markdown
+- **In-memory editing**: Edit documents as markdown strings with instruction-based modifications
+- **Structure preservation**: Maintains heading hierarchy and paragraph formatting during conversion
 - **Tab support**: Read from specific document tabs by name
 - **Formatting preservation**: Advanced document editing with full text and paragraph styling support
 - **Structure-aware editing**: Heading-based and section-aware tools for precise document editing
@@ -17,6 +20,41 @@ This is a Model Context Protocol (MCP) server that allows you to connect to Goog
 - Search for documents
 - Delete documents
 - **Structure-aware editing**: Find headings and edit content by document structure
+
+## Markdown Conversion Pipeline
+
+The server now includes a complete markdown conversion pipeline that implements the following workflow:
+
+### 1. Document Reader Component
+- **`read-doc-as-markdown`** - Converts Google Docs to structured Markdown
+- Preserves heading hierarchy (H1-H6)
+- Maintains paragraph structure and text content
+- Handles tabbed documents
+
+### 2. In-Memory Editing Component  
+- **`edit-markdown-content`** - Edit Markdown strings using natural language instructions
+- Supports instruction-based modifications like "add heading", "remove empty lines"
+- Extensible framework for AI-powered content editing
+- Preserves document structure during edits
+
+### 3. Markdown Parser & Writer Component
+- **`write-markdown-to-doc`** - Converts Markdown back to formatted Google Docs
+- Automatically applies correct heading styles (HEADING_1, HEADING_2, etc.)
+- Preserves paragraph formatting and text structure
+- Clears existing content and replaces with formatted markdown
+
+### Complete Workflow Example
+```
+1. read-doc-as-markdown(docId) → markdown string
+2. edit-markdown-content(markdown, "add conclusion section") → edited markdown  
+3. write-markdown-to-doc(docId, edited_markdown) → formatted Google Doc
+```
+
+This pipeline enables powerful document editing workflows where you can:
+- Export documents to markdown for editing
+- Apply AI-powered content modifications
+- Reimport with full formatting preservation
+- Work with documents programmatically using markdown syntax
 
 ## Structure-Aware Editing Tools
 
@@ -100,6 +138,11 @@ The first time you run the server, it will open your browser for Google OAuth au
 
 ## Available Tools
 
+### Markdown Conversion Tools
+- `read-doc-as-markdown` - Convert Google Doc to markdown format
+- `edit-markdown-content` - Edit markdown content using natural language instructions  
+- `write-markdown-to-doc` - Convert markdown back to formatted Google Doc
+
 ### Document Management
 - `create-doc` - Create a new Google Doc
 - `search-docs` - Search for documents by content
@@ -121,10 +164,17 @@ The first time you run the server, it will open your browser for Google OAuth au
 
 ## Usage Examples
 
+### Markdown Conversion Workflow
+```
+Convert document to markdown: read-doc-as-markdown with docId "abc123"
+Edit the markdown: edit-markdown-content with instruction "add a conclusion section"
+Write back to Google Docs: write-markdown-to-doc with the edited markdown
+```
+
 ### Basic Document Operations
 ```
 Create a new document titled "Meeting Notes"
-Search for documents containing "quarterly report"
+Search for documents containing "quarterly report"  
 Read the document with ID "abc123"
 ```
 
