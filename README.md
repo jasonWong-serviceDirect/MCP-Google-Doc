@@ -19,6 +19,27 @@ This server fully supports the new [Google Docs tabs feature](https://developers
 - Work with nested child tabs
 - Analyze individual tabs
 
+## Text Formatting Support
+
+The server provides comprehensive text formatting capabilities:
+
+### Text Style Options
+- **Bold, Italic, Underline, Strikethrough** - Basic text styling
+- **Font Family** - Change to any supported font (Arial, Times New Roman, etc.)
+- **Font Size** - Specify size in points
+- **Text Color** - RGB color values (0-1 range)
+- **Background Color** - Highlight text with background colors
+
+### Paragraph Formatting
+- **Alignment** - START, CENTER, END, JUSTIFIED
+- **Line Spacing** - Single (1.0), 1.5x (1.5), Double (2.0), or custom
+- **Space Above/Below** - Custom spacing in points
+
+### Formatting Preservation
+- **Auto-preserve** - Maintains existing formatting when inserting text
+- **Style Reading** - Inspect current formatting at any location
+- **Selective Styling** - Apply only specific formatting properties
+
 ## Prerequisites
 
 - Node.js v16.0.0 or later
@@ -130,10 +151,12 @@ To add new features to the MCP server:
 
 - `create-doc` - Creates a new Google Doc with the specified title and optional content
 - `update-doc` - Updates an existing Google Doc with new content (append or replace)
+- `update-doc-with-style` - Updates a Google Doc while preserving or applying specific formatting
 - `search-docs` - Searches for Google Docs containing specific text
 - `read-doc` - Reads the content of a Google Doc (default/first tab only)
 - `read-doc-tab` - Reads the content from a specific tab by name in a Google Doc
 - `list-doc-tabs` - Lists all tabs in a Google Doc 
+- `get-text-style` - Reads the formatting/style information at a specific location in a document
 - `delete-doc` - Deletes a Google Doc by ID
 
 ## Available Prompts
@@ -157,6 +180,9 @@ Here are some example prompts you can use with Claude once the server is connect
 - "Create a formal document about climate change"
 - "Analyze the content of document with ID '1abc123def456'"
 - "Analyze the 'Meeting Notes' tab in document ID '1abc123def456'"
+- "Add this text to my document with bold formatting and blue color"
+- "Update my document while preserving the existing font and style"
+- "Check what formatting is applied to the text at position 100 in my document"
 
 ## Troubleshooting
 

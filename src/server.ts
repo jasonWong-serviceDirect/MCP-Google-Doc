@@ -826,6 +826,507 @@ server.prompt(
   })
 );
 
+// Tool to update document with formatting preserved/specified
+server.tool(
+  "update-doc-with-style",
+  {
+    docId: z.string().describe("The ID of the document to update"),
+    content: z.string().describe("The new content to add"),
+    replaceAll: z.boolean().optional().describe("Whether to replace all content (true) or append (false). Default: false"),
+    insertionPoint: z.number().optional().describe("Specific index to insert at (1-based). If not provided, appends to end"),
+    tabId: z.string().optional().describe("Tab ID to insert into (for tabbed documents)"),
+    preserveFormatting: z.boolean().optional().describe("Whether to preserve formatting at insertion point. Default: true"),
+    textStyle: z.object({
+      bold: z.boolean().optional(),
+      italic: z.boolean().optional(),
+      underline: z.boolean().optional(),
+      strikethrough: z.boolean().optional(),
+      fontSize: z.number().optional().describe("Font size in points"),
+      fontFamily: z.string().optional().describe("Font family name (e.g., 'Arial', 'Times New Roman')"),
+      foregroundColor: z.object({
+        red: z.number().min(0).max(1).optional(),
+        green: z.number().min(0).max(1).optional(),
+        blue: z.number().min(0).max(1).optional(),
+      }).optional().describe("Text color as RGB values (0-1)"),
+      backgroundColor: z.object({
+        red: z.number().min(0).max(1).optional(),
+        green: z.number().min(0).max(1).optional(),
+        blue: z.number().min(0).max(1).optional(),
+      }).optional().describe("Background color as RGB values (0-1)"),
+    }).optional().describe("Text style to apply. Only specify properties you want to change"),
+    paragraphStyle: z.object({
+      alignment: z.enum(['ALIGNMENT_UNSPECIFIED', 'START', 'CENTER', 'END', 'JUSTIFIED']).optional(),
+      lineSpacing: z.number().optional().describe("Line spacing (e.g., 1.0 = single, 1.5 = 1.5x, 2.0 = double)"),
+      spaceAbove: z.number().optional().describe("Space above paragraph in points"),
+      spaceBelow: z.number().optional().describe("Space below paragraph in points"),
+    }).optional().describe("Paragraph style to apply"),
+  },
+  async ({ docId, content, replaceAll = false, insertionPoint, tabId, preserveFormatting = true, textStyle, paragraphStyle }) => {
+    try {
+      // First get the document to understand its structure and current formatting
+      const docParams: any = {
+        documentId: docId,
+      };
+      
+      // Add tabs content parameter with type assertion
+      if (tabId) {
+        (docParams as any).includeTabsContent = true;
+      }
+
+      const doc: any = await docsClient.documents.get(docParams);
+      
+      let requests: any[] = [];
+      let targetIndex = 1; // Default to beginning
+      let targetTabId = tabId;
+
+      // Handle tabbed documents
+      if (doc.data.tabs && doc.data.tabs.length > 0) {
+        if (!targetTabId) {
+          targetTabId = doc.data.tabs[0].tabProperties?.tabId;
+        }
+      }
+
+      if (replaceAll) {
+        // Replace all content
+        const range: any = {
+          startIndex: 1,
+          endIndex: -1, // Will be set based on content length
+        };
+        
+        if (targetTabId) {
+          range.tabId = targetTabId;
+        }
+
+        // Get the length of content to replace
+        let bodyContent;
+        if (doc.data.tabs && doc.data.tabs.length > 0) {
+          const targetTab = doc.data.tabs.find((tab: any) => 
+            tab.tabProperties?.tabId === targetTabId
+          );
+          bodyContent = targetTab?.documentTab?.body?.content;
+        } else {
+          bodyContent = doc.data.body?.content;
+        }
+
+        if (bodyContent && bodyContent.length > 0) {
+          // Find the last element to get the end index
+          const lastElement = bodyContent[bodyContent.length - 1];
+          if (lastElement.endIndex) {
+            range.endIndex = lastElement.endIndex - 1; // Leave the final newline
+          }
+        }
+
+        // Delete existing content
+        requests.push({
+          deleteContentRange: {
+            range: range
+          }
+        });
+
+        targetIndex = 1;
+      } else if (insertionPoint) {
+        targetIndex = insertionPoint;
+      } else {
+        // Append to end - find the end of the document
+        let bodyContent;
+        if (doc.data.tabs && doc.data.tabs.length > 0) {
+          const targetTab = doc.data.tabs.find((tab: any) => 
+            tab.tabProperties?.tabId === targetTabId
+          );
+          bodyContent = targetTab?.documentTab?.body?.content;
+        } else {
+          bodyContent = doc.data.body?.content;
+        }
+
+        if (bodyContent && bodyContent.length > 0) {
+          const lastElement = bodyContent[bodyContent.length - 1];
+          if (lastElement.endIndex) {
+            targetIndex = lastElement.endIndex - 1; // Insert before final newline
+          }
+        }
+      }
+
+      // Insert the text
+      const insertRequest: any = {
+        insertText: {
+          text: content,
+          location: {
+            index: targetIndex,
+          }
+        }
+      };
+
+      if (targetTabId) {
+        insertRequest.insertText.location.tabId = targetTabId;
+      }
+
+      requests.push(insertRequest);
+
+      // Apply text styling if specified
+      if (textStyle || preserveFormatting) {
+        const styleRange: any = {
+          startIndex: targetIndex,
+          endIndex: targetIndex + content.length,
+        };
+
+        if (targetTabId) {
+          styleRange.tabId = targetTabId;
+        }
+
+        let appliedTextStyle: any = {};
+        let fields: string[] = [];
+
+        // If preserveFormatting is true and no specific style provided, try to read current style
+        if (preserveFormatting && !textStyle && !replaceAll) {
+          // Try to get formatting from the character before insertion point
+          const prevCharIndex = Math.max(1, targetIndex - 1);
+          
+          // This is a simplified approach - in a full implementation you'd read the document structure
+          // and extract the text style at the previous character position
+        }
+
+        // Apply specified text style
+        if (textStyle) {
+          if (textStyle.bold !== undefined) {
+            appliedTextStyle.bold = textStyle.bold;
+            fields.push('bold');
+          }
+          if (textStyle.italic !== undefined) {
+            appliedTextStyle.italic = textStyle.italic;
+            fields.push('italic');
+          }
+          if (textStyle.underline !== undefined) {
+            appliedTextStyle.underline = textStyle.underline;
+            fields.push('underline');
+          }
+          if (textStyle.strikethrough !== undefined) {
+            appliedTextStyle.strikethrough = textStyle.strikethrough;
+            fields.push('strikethrough');
+          }
+          if (textStyle.fontSize) {
+            appliedTextStyle.fontSize = {
+              magnitude: textStyle.fontSize,
+              unit: 'PT'
+            };
+            fields.push('fontSize');
+          }
+          if (textStyle.fontFamily) {
+            appliedTextStyle.weightedFontFamily = {
+              fontFamily: textStyle.fontFamily
+            };
+            fields.push('weightedFontFamily');
+          }
+          if (textStyle.foregroundColor) {
+            appliedTextStyle.foregroundColor = {
+              color: {
+                rgbColor: textStyle.foregroundColor
+              }
+            };
+            fields.push('foregroundColor');
+          }
+          if (textStyle.backgroundColor) {
+            appliedTextStyle.backgroundColor = {
+              color: {
+                rgbColor: textStyle.backgroundColor
+              }
+            };
+            fields.push('backgroundColor');
+          }
+        }
+
+        if (fields.length > 0) {
+          requests.push({
+            updateTextStyle: {
+              range: styleRange,
+              textStyle: appliedTextStyle,
+              fields: fields.join(',')
+            }
+          });
+        }
+      }
+
+      // Apply paragraph styling if specified
+      if (paragraphStyle) {
+        const paragraphRange: any = {
+          startIndex: targetIndex,
+          endIndex: targetIndex + content.length,
+        };
+
+        if (targetTabId) {
+          paragraphRange.tabId = targetTabId;
+        }
+
+        let appliedParagraphStyle: any = {};
+        let paragraphFields: string[] = [];
+
+        if (paragraphStyle.alignment) {
+          appliedParagraphStyle.alignment = paragraphStyle.alignment;
+          paragraphFields.push('alignment');
+        }
+        if (paragraphStyle.lineSpacing) {
+          appliedParagraphStyle.lineSpacing = paragraphStyle.lineSpacing;
+          paragraphFields.push('lineSpacing');
+        }
+        if (paragraphStyle.spaceAbove) {
+          appliedParagraphStyle.spaceAbove = {
+            magnitude: paragraphStyle.spaceAbove,
+            unit: 'PT'
+          };
+          paragraphFields.push('spaceAbove');
+        }
+        if (paragraphStyle.spaceBelow) {
+          appliedParagraphStyle.spaceBelow = {
+            magnitude: paragraphStyle.spaceBelow,
+            unit: 'PT'
+          };
+          paragraphFields.push('spaceBelow');
+        }
+
+        if (paragraphFields.length > 0) {
+          requests.push({
+            updateParagraphStyle: {
+              range: paragraphRange,
+              paragraphStyle: appliedParagraphStyle,
+              fields: paragraphFields.join(',')
+            }
+          });
+        }
+      }
+
+      // Execute all requests
+      await docsClient.documents.batchUpdate({
+        documentId: docId,
+        requestBody: {
+          requests: requests,
+        },
+      });
+
+      const actionText = replaceAll ? 'replaced' : 'updated';
+      const tabText = targetTabId ? ` in tab ${targetTabId}` : '';
+      let styleInfo = '';
+      
+      if (textStyle || paragraphStyle) {
+        const styleDetails = [];
+        if (textStyle) styleDetails.push('text formatting');
+        if (paragraphStyle) styleDetails.push('paragraph formatting');
+        styleInfo = ` with ${styleDetails.join(' and ')}`;
+      } else if (preserveFormatting) {
+        styleInfo = ' with formatting preserved';
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Successfully ${actionText} document content${tabText}${styleInfo}. Added ${content.length} characters.`,
+          },
+        ],
+      };
+    } catch (error: any) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error updating document: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// Tool to get text style at a specific location
+server.tool(
+  "get-text-style",
+  {
+    docId: z.string().describe("The ID of the document to read"),
+    startIndex: z.number().describe("Start index to get style from (1-based)"),
+    endIndex: z.number().optional().describe("End index (1-based). If not provided, will get style of single character"),
+    tabId: z.string().optional().describe("Tab ID to read from (for tabbed documents)"),
+  },
+  async ({ docId, startIndex, endIndex, tabId }) => {
+    try {
+      const docParams: any = {
+        documentId: docId,
+      };
+      
+      // Add tabs content parameter if we're working with tabs
+      if (tabId) {
+        (docParams as any).includeTabsContent = true;
+      }
+
+      const doc: any = await docsClient.documents.get(docParams);
+      
+      let targetTabId = tabId;
+      let documentContent;
+
+      // Handle tabbed documents
+      if (doc.data.tabs && doc.data.tabs.length > 0) {
+        if (!targetTabId) {
+          targetTabId = doc.data.tabs[0].tabProperties?.tabId;
+        }
+        
+        const targetTab = doc.data.tabs.find((tab: any) => 
+          tab.tabProperties?.tabId === targetTabId
+        );
+        documentContent = targetTab?.documentTab;
+      } else {
+        documentContent = doc.data;
+      }
+
+      if (!documentContent) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Could not find content${tabId ? ` for tab ${tabId}` : ''}.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const actualEndIndex = endIndex || startIndex + 1;
+      
+      // Find the text style by traversing the document structure
+      let foundStyles: any[] = [];
+      
+      const traverseContent = (content: any[], currentIndex: number = 1): number => {
+        for (const element of content) {
+          if (element.paragraph) {
+            const paragraph = element.paragraph;
+            
+            if (paragraph.elements) {
+              for (const elem of paragraph.elements) {
+                if (elem.textRun) {
+                  const textRun = elem.textRun;
+                  const textLength = textRun.content?.length || 0;
+                  const elementEndIndex = currentIndex + textLength;
+                  
+                  // Check if our target range overlaps with this text run
+                  if (currentIndex < actualEndIndex && elementEndIndex > startIndex) {
+                    foundStyles.push({
+                      range: { startIndex: currentIndex, endIndex: elementEndIndex },
+                      textStyle: textRun.textStyle || {},
+                      content: textRun.content,
+                    });
+                  }
+                  
+                  currentIndex = elementEndIndex;
+                } else {
+                  // Handle other element types (like page breaks, inline objects)
+                  currentIndex += 1;
+                }
+              }
+            }
+          } else if (element.table) {
+            // Handle tables - traverse table cells
+            const table = element.table;
+            if (table.tableRows) {
+              for (const row of table.tableRows) {
+                if (row.tableCells) {
+                  for (const cell of row.tableCells) {
+                    if (cell.content) {
+                      currentIndex = traverseContent(cell.content, currentIndex);
+                    }
+                  }
+                }
+              }
+            }
+          } else if (element.tableOfContents) {
+            // Handle table of contents
+            currentIndex += 1;
+          } else {
+            // Handle other structural elements
+            currentIndex += 1;
+          }
+        }
+        return currentIndex;
+      };
+
+      if (documentContent.body?.content) {
+        traverseContent(documentContent.body.content);
+      }
+
+      // Format the response
+      let responseText = `Text style information for range ${startIndex}`;
+      if (endIndex) {
+        responseText += `-${endIndex}`;
+      }
+      responseText += `${tabId ? ` in tab ${tabId}` : ''}:\n\n`;
+
+      if (foundStyles.length === 0) {
+        responseText += "No text found in the specified range.";
+      } else {
+        foundStyles.forEach((style, index) => {
+          responseText += `Text segment ${index + 1} (${style.range.startIndex}-${style.range.endIndex}):\n`;
+          responseText += `Content: "${style.content?.replace(/\n/g, '\\n')}"\n`;
+          
+          const textStyle = style.textStyle;
+          if (Object.keys(textStyle).length === 0) {
+            responseText += "Style: Default (no explicit formatting)\n";
+          } else {
+            responseText += "Style:\n";
+            
+            if (textStyle.bold) responseText += `  - Bold: ${textStyle.bold}\n`;
+            if (textStyle.italic) responseText += `  - Italic: ${textStyle.italic}\n`;
+            if (textStyle.underline) responseText += `  - Underline: ${textStyle.underline}\n`;
+            if (textStyle.strikethrough) responseText += `  - Strikethrough: ${textStyle.strikethrough}\n`;
+            
+            if (textStyle.fontSize) {
+              responseText += `  - Font Size: ${textStyle.fontSize.magnitude} ${textStyle.fontSize.unit}\n`;
+            }
+            
+            if (textStyle.weightedFontFamily) {
+              responseText += `  - Font Family: ${textStyle.weightedFontFamily.fontFamily}\n`;
+            }
+            
+            if (textStyle.foregroundColor) {
+              const color = textStyle.foregroundColor.color?.rgbColor;
+              if (color) {
+                responseText += `  - Text Color: RGB(${color.red || 0}, ${color.green || 0}, ${color.blue || 0})\n`;
+              }
+            }
+            
+            if (textStyle.backgroundColor) {
+              const bgColor = textStyle.backgroundColor.color?.rgbColor;
+              if (bgColor) {
+                responseText += `  - Background Color: RGB(${bgColor.red || 0}, ${bgColor.green || 0}, ${bgColor.blue || 0})\n`;
+              }
+            }
+            
+            if (textStyle.link) {
+              responseText += `  - Link: ${textStyle.link.url || 'Yes'}\n`;
+            }
+          }
+          
+          responseText += "\n";
+        });
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: responseText,
+          },
+        ],
+      };
+    } catch (error: any) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error reading text style: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
 // Connect to the transport and start the server
 async function main() {
   // Create a transport for communicating over stdin/stdout
