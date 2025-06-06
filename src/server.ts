@@ -17,7 +17,12 @@ const SCOPES = [
 ];
 
 // Resolve paths relative to the project root
-const PROJECT_ROOT = path.resolve(path.join(path.dirname(new URL(import.meta.url).pathname), '..'));
+// Fix path resolution for Windows by removing the leading slash from file URLs
+const currentFilePath = new URL(import.meta.url).pathname;
+const fixedPath = process.platform === 'win32' && currentFilePath.startsWith('/') 
+  ? currentFilePath.slice(1) 
+  : currentFilePath;
+const PROJECT_ROOT = path.resolve(path.join(path.dirname(fixedPath), '..'));
 
 // The token path is where we'll store the OAuth credentials
 const TOKEN_PATH = path.join(PROJECT_ROOT, "token.json");
