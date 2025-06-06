@@ -1,6 +1,7 @@
 # New features in this fork:
 
-tab support
+- **Tab support**: Read from specific document tabs by name
+- **Formatting preservation**: Advanced document editing with full text and paragraph styling support
 
 # Google Docs MCP Server
 
@@ -187,6 +188,27 @@ Here are some example prompts you can use with Claude once the server is connect
 - "Add this text to my document with bold formatting and blue color"
 - "Update my document while preserving the existing font and style"
 - "Check what formatting is applied to the text at position 100 in my document"
+
+### Advanced Formatting Examples
+
+**Adding styled text:**
+```
+Add "Important Notice" to document 123 with bold text, red color, and center alignment
+```
+
+**Preserving existing formatting:**
+```
+Insert "Additional content" at position 50 in document 123 while keeping current formatting
+```
+
+**Applying multiple styles:**
+```
+Update document 123 with "Executive Summary" using:
+- Font: Arial, size 16
+- Bold and underlined
+- Blue text color
+- Double line spacing
+```
 
 ## Troubleshooting
 

@@ -278,7 +278,210 @@ server.tool(
   }
 );
 
-// Tool to update an existing document
+// Tool to update an existing document with formatting preservation
+server.tool(
+  "update-doc-with-style",
+  {
+    docId: z.string().describe("The ID of the document to update"),
+    content: z.string().describe("The new content to add"),
+    replaceAll: z.boolean().optional().describe("Whether to replace all content (true) or append (false). Default: false"),
+    insertionPoint: z.number().optional().describe("Specific index to insert at (1-based). If not provided, appends to end"),
+    preserveFormatting: z.boolean().optional().describe("Whether to preserve formatting at insertion point. Default: true"),
+    tabId: z.string().optional().describe("Tab ID to insert into (for tabbed documents)"),
+    textStyle: z.object({
+      bold: z.boolean().optional(),
+      italic: z.boolean().optional(),
+      underline: z.boolean().optional(),
+      strikethrough: z.boolean().optional(),
+      fontSize: z.number().optional().describe("Font size in points"),
+      fontFamily: z.string().optional().describe("Font family name (e.g., 'Arial', 'Times New Roman')"),
+      foregroundColor: z.object({
+        red: z.number().min(0).max(1),
+        green: z.number().min(0).max(1),
+        blue: z.number().min(0).max(1),
+      }).optional().describe("Text color as RGB values (0-1)"),
+      backgroundColor: z.object({
+        red: z.number().min(0).max(1),
+        green: z.number().min(0).max(1),
+        blue: z.number().min(0).max(1),
+      }).optional().describe("Background color as RGB values (0-1)"),
+    }).optional().describe("Text style to apply. Only specify properties you want to change"),
+    paragraphStyle: z.object({
+      alignment: z.enum(["ALIGNMENT_UNSPECIFIED", "START", "CENTER", "END", "JUSTIFIED"]).optional(),
+      lineSpacing: z.number().optional().describe("Line spacing (e.g., 1.0 = single, 1.5 = 1.5x, 2.0 = double)"),
+      spaceAbove: z.number().optional().describe("Space above paragraph in points"),
+      spaceBelow: z.number().optional().describe("Space below paragraph in points"),
+    }).optional().describe("Paragraph style to apply"),
+  },
+  async ({ 
+    docId, 
+    content, 
+    replaceAll = false, 
+    insertionPoint, 
+    preserveFormatting = true, 
+    tabId, 
+    textStyle, 
+    paragraphStyle 
+  }) => {
+    try {
+      if (!docId) {
+        throw new Error("Document ID is required");
+      }
+      
+      const documentId = docId.toString();
+      
+      // Get the document to understand its structure
+      const doc = await (docsClient.documents.get as any)({
+        documentId,
+        includeTabsContent: true,
+      });
+      
+      let targetBody = doc.data.body;
+      let baseIndex = 1;
+      
+      // If tabId is specified, find the target tab
+      if (tabId && doc.data.tabs) {
+        const allTabs = collectAllTabs(doc.data.tabs);
+        const targetTab = allTabs.find(tab => 
+          tab.tabId === tabId || 
+          (tab.documentTab?.title && tab.documentTab.title.toLowerCase() === tabId.toLowerCase())
+        );
+        
+        if (targetTab && targetTab.documentTab) {
+          targetBody = targetTab.documentTab.body;
+          baseIndex = 1; // Tabs start at index 1
+        } else {
+          throw new Error(`Tab "${tabId}" not found`);
+        }
+      }
+      
+      // Calculate document length and insertion point
+      let documentLength = baseIndex;
+      const traverseContent = (content: any[], currentIndex: number = baseIndex): number => {
+        content.forEach((element: any) => {
+          if (element.paragraph) {
+            element.paragraph.elements.forEach((paragraphElement: any) => {
+              if (paragraphElement.textRun && paragraphElement.textRun.content) {
+                currentIndex += paragraphElement.textRun.content.length;
+              }
+            });
+          } else if (element.table) {
+            element.table.tableRows.forEach((row: any) => {
+              row.tableCells.forEach((cell: any) => {
+                if (cell.content) {
+                  currentIndex = traverseContent(cell.content, currentIndex);
+                }
+              });
+            });
+          }
+        });
+        return currentIndex;
+      };
+      
+      if (targetBody && targetBody.content) {
+        documentLength = traverseContent(targetBody.content, baseIndex);
+      }
+      
+      const requests: any[] = [];
+      let insertIndex: number;
+      
+      if (replaceAll) {
+        // Delete all content first
+        requests.push({
+          deleteContentRange: {
+            range: {
+              startIndex: baseIndex,
+              endIndex: documentLength,
+            },
+          },
+        });
+        insertIndex = baseIndex;
+      } else if (insertionPoint) {
+        // Use specified insertion point (convert from 1-based to 0-based if needed)
+        insertIndex = Math.max(baseIndex, Math.min(insertionPoint, documentLength));
+      } else {
+        // Append to end
+        insertIndex = documentLength;
+      }
+      
+      // Insert the new content
+      requests.push({
+        insertText: {
+          location: {
+            index: insertIndex,
+            ...(tabId && { tabId }),
+          },
+          text: content,
+        },
+      });
+      
+      // Apply text styling if specified
+      if (textStyle && Object.keys(textStyle).length > 0) {
+        const endIndex = insertIndex + content.length;
+        
+        requests.push({
+          updateTextStyle: {
+            range: {
+              startIndex: insertIndex,
+              endIndex: endIndex,
+              ...(tabId && { tabId }),
+            },
+            textStyle: textStyle,
+            fields: Object.keys(textStyle).join(','),
+          },
+        });
+      }
+      
+      // Apply paragraph styling if specified
+      if (paragraphStyle && Object.keys(paragraphStyle).length > 0) {
+        const endIndex = insertIndex + content.length;
+        
+        requests.push({
+          updateParagraphStyle: {
+            range: {
+              startIndex: insertIndex,
+              endIndex: endIndex,
+              ...(tabId && { tabId }),
+            },
+            paragraphStyle: paragraphStyle,
+            fields: Object.keys(paragraphStyle).join(','),
+          },
+        });
+      }
+      
+      // Execute all requests
+      await docsClient.documents.batchUpdate({
+        documentId,
+        requestBody: {
+          requests,
+        },
+      });
+      
+      const tabInfo = tabId ? ` in tab "${tabId}"` : '';
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Document updated successfully with formatting preserved!${tabInfo}\nDocument ID: ${docId}\nContent inserted at index: ${insertIndex}`,
+          },
+        ],
+      };
+    } catch (error) {
+      console.error("Error updating document with style:", error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error updating document: ${error}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// Keep the original update-doc for backward compatibility
 server.tool(
   "update-doc",
   {
@@ -392,6 +595,128 @@ server.tool(
           {
             type: "text",
             text: `Error updating document: ${error}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// Tool to get text style from a specific location in document
+server.tool(
+  "get-text-style",
+  {
+    docId: z.string().describe("The ID of the document to read"),
+    startIndex: z.number().describe("Start index to get style from (1-based)"),
+    endIndex: z.number().optional().describe("End index (1-based). If not provided, will get style of single character"),
+    tabId: z.string().optional().describe("Tab ID to read from (for tabbed documents)"),
+  },
+  async ({ docId, startIndex, endIndex, tabId }) => {
+    try {
+      if (!docId) {
+        throw new Error("Document ID is required");
+      }
+      
+      const documentId = docId.toString();
+      
+      // Get the document with full content
+      const doc = await (docsClient.documents.get as any)({
+        documentId,
+        includeTabsContent: true,
+      });
+      
+      let targetBody = doc.data.body;
+      
+      // If tabId is specified, find the target tab
+      if (tabId && doc.data.tabs) {
+        const allTabs = collectAllTabs(doc.data.tabs);
+        const targetTab = allTabs.find(tab => 
+          tab.tabId === tabId || 
+          (tab.documentTab?.title && tab.documentTab.title.toLowerCase() === tabId.toLowerCase())
+        );
+        
+        if (targetTab && targetTab.documentTab) {
+          targetBody = targetTab.documentTab.body;
+        } else {
+          throw new Error(`Tab "${tabId}" not found`);
+        }
+      }
+      
+      const effectiveEndIndex = endIndex || startIndex + 1;
+      const styleInfo: any = {
+        range: {
+          startIndex,
+          endIndex: effectiveEndIndex,
+        },
+        textStyles: [],
+        paragraphStyles: [],
+      };
+      
+      // Traverse content to find styles at the specified range
+      const traverseContent = (content: any[], currentIndex: number = 1): number => {
+        content.forEach((element: any) => {
+          if (element.paragraph) {
+            // Check paragraph style
+            if (currentIndex <= effectiveEndIndex && currentIndex + (element.paragraph.elements?.length || 0) >= startIndex) {
+              if (element.paragraph.paragraphStyle) {
+                styleInfo.paragraphStyles.push({
+                  range: { startIndex: currentIndex, endIndex: currentIndex + (element.paragraph.elements?.length || 0) },
+                  style: element.paragraph.paragraphStyle,
+                });
+              }
+              
+              // Check text styles within paragraph
+              element.paragraph.elements.forEach((paragraphElement: any) => {
+                if (paragraphElement.textRun) {
+                  const textLength = paragraphElement.textRun.content?.length || 0;
+                  const textEndIndex = currentIndex + textLength;
+                  
+                  if (currentIndex <= effectiveEndIndex && textEndIndex >= startIndex) {
+                    styleInfo.textStyles.push({
+                      range: { startIndex: currentIndex, endIndex: textEndIndex },
+                      content: paragraphElement.textRun.content,
+                      style: paragraphElement.textRun.textStyle || {},
+                    });
+                  }
+                  
+                  currentIndex += textLength;
+                }
+              });
+            }
+          } else if (element.table) {
+            element.table.tableRows.forEach((row: any) => {
+              row.tableCells.forEach((cell: any) => {
+                if (cell.content) {
+                  currentIndex = traverseContent(cell.content, currentIndex);
+                }
+              });
+            });
+          }
+        });
+        return currentIndex;
+      };
+      
+      if (targetBody && targetBody.content) {
+        traverseContent(targetBody.content, 1);
+      }
+      
+      const tabInfo = tabId ? ` from tab "${tabId}"` : '';
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Text style information${tabInfo}:\n\n${JSON.stringify(styleInfo, null, 2)}`,
+          },
+        ],
+      };
+    } catch (error) {
+      console.error("Error getting text style:", error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting text style: ${error}`,
           },
         ],
         isError: true,
