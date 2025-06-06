@@ -469,6 +469,267 @@ server.tool(
   }
 );
 
+// Tool to read a document
+server.tool(
+  "read-doc",
+  {
+    docId: z.string().describe("The ID of the document to read"),
+  },
+  async ({ docId }) => {
+    try {
+      const doc = await docsClient.documents.get({
+        documentId: docId,
+      });
+      
+      // Extract the document content
+      let content = `Document: ${doc.data.title}\n\n`;
+      
+      // Process the document content from the complex data structure
+      const document = doc.data;
+      if (document && document.body && document.body.content) {
+        let textContent = "";
+        
+        // Loop through the document's structural elements
+        document.body.content.forEach((element: any) => {
+          if (element.paragraph) {
+            element.paragraph.elements.forEach((paragraphElement: any) => {
+              if (paragraphElement.textRun && paragraphElement.textRun.content) {
+                textContent += paragraphElement.textRun.content;
+              }
+            });
+          }
+        });
+        
+        content += textContent;
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: content,
+          },
+        ],
+      };
+    } catch (error) {
+      console.error(`Error reading document ${docId}:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error reading document: ${error}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// Helper function to extract text content from document elements
+function extractTextFromContent(content: any[]): string {
+  let textContent = "";
+  
+  content.forEach((element: any) => {
+    if (element.paragraph) {
+      element.paragraph.elements.forEach((paragraphElement: any) => {
+        if (paragraphElement.textRun && paragraphElement.textRun.content) {
+          textContent += paragraphElement.textRun.content;
+        }
+      });
+    } else if (element.table) {
+      // Handle table content
+      element.table.tableRows.forEach((row: any) => {
+        row.tableCells.forEach((cell: any) => {
+          if (cell.content) {
+            textContent += extractTextFromContent(cell.content);
+          }
+        });
+      });
+    }
+  });
+  
+  return textContent;
+}
+
+// Helper function to collect all tabs (including child tabs) recursively
+function collectAllTabs(tabs: any[]): any[] {
+  const allTabs: any[] = [];
+  
+  function collectTabs(tabList: any[]) {
+    tabList.forEach((tab: any) => {
+      if (tab.documentTab) {
+        allTabs.push(tab);
+      }
+      if (tab.childTabs && tab.childTabs.length > 0) {
+        collectTabs(tab.childTabs);
+      }
+    });
+  }
+  
+  collectTabs(tabs);
+  return allTabs;
+}
+
+// Tool to read from a specific tab by name
+server.tool(
+  "read-doc-tab",
+  {
+    docId: z.string().describe("The ID of the document to read"),
+    tabName: z.string().describe("The name of the tab to read from"),
+  },
+  async ({ docId, tabName }) => {
+    try {
+      // Use the googleapis client but bypass TypeScript checking for the new parameter
+      // The includeTabsContent parameter is officially supported by the Google Docs API
+      // Reference: https://developers.google.com/workspace/docs/api/how-tos/tabs
+      const response = await (docsClient.documents as any).get({
+        documentId: docId,
+        includeTabsContent: true,
+      });
+      
+      const doc = response.data;
+      let content = `Document: ${doc.title}\n`;
+      
+      // Check if document has tabs
+      if (!doc.tabs || doc.tabs.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Document "${doc.title}" does not have any tabs. Use the regular read-doc tool instead.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      
+      // Collect all tabs (including child tabs)
+      const allTabs = collectAllTabs(doc.tabs);
+      
+      // Find the tab with the specified name (case-insensitive)
+      const targetTab = allTabs.find((tab: any) => {
+        const tabTitle = tab.tabProperties?.title;
+        return tabTitle && tabTitle.toLowerCase().trim() === tabName.toLowerCase().trim();
+      });
+      
+      if (!targetTab) {
+        // List available tabs for user reference
+        const availableTabs = allTabs.map((tab: any) => 
+          tab.tabProperties?.title || "Untitled Tab"
+        );
+        
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Tab "${tabName}" not found in document "${doc.title}".\n\nAvailable tabs:\n${availableTabs.map(name => `- ${name}`).join('\n')}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      
+      // Extract content from the found tab
+      const tabTitle = targetTab.tabProperties?.title || "Untitled Tab";
+      content += `Tab: ${tabTitle}\n\n`;
+      
+      if (targetTab.documentTab?.body?.content) {
+        const textContent = extractTextFromContent(targetTab.documentTab.body.content);
+        content += textContent;
+      } else {
+        content += "No content found in this tab.";
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: content,
+          },
+        ],
+      };
+    } catch (error) {
+      console.error(`Error reading tab "${tabName}" from document ${docId}:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error reading tab "${tabName}" from document: ${error}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
+// Tool to list all tabs in a document
+server.tool(
+  "list-doc-tabs",
+  {
+    docId: z.string().describe("The ID of the document to list tabs for"),
+  },
+  async ({ docId }) => {
+    try {
+      // Use the googleapis client but bypass TypeScript checking for the new parameter
+      // The includeTabsContent parameter is officially supported by the Google Docs API
+      // Reference: https://developers.google.com/workspace/docs/api/how-tos/tabs
+      const response = await (docsClient.documents as any).get({
+        documentId: docId,
+        includeTabsContent: true,
+      });
+      
+      const doc = response.data;
+      let content = `Document: ${doc.title}\n\n`;
+      
+      // Check if document has tabs
+      if (!doc.tabs || doc.tabs.length === 0) {
+        content += "This document does not have any tabs.";
+        return {
+          content: [
+            {
+              type: "text",
+              text: content,
+            },
+          ],
+        };
+      }
+      
+      // Collect all tabs (including child tabs)
+      const allTabs = collectAllTabs(doc.tabs);
+      
+      content += `Found ${allTabs.length} tab(s):\n\n`;
+      
+      allTabs.forEach((tab: any, index: number) => {
+        const tabTitle = tab.tabProperties?.title || "Untitled Tab";
+        const tabId = tab.tabProperties?.tabId || "No ID";
+        content += `${index + 1}. "${tabTitle}" (ID: ${tabId})\n`;
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: content,
+          },
+        ],
+      };
+    } catch (error) {
+      console.error(`Error listing tabs for document ${docId}:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error listing tabs for document: ${error}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+);
+
 // Tool to delete a document
 server.tool(
   "delete-doc",
@@ -542,6 +803,24 @@ server.prompt(
       content: {
         type: "text",
         text: `Please analyze the content of the document with ID ${docId}. Provide a summary of its content, structure, key points, and any suggestions for improvement.`
+      }
+    }]
+  })
+);
+
+// Prompt for analyzing a specific tab
+server.prompt(
+  "analyze-doc-tab",
+  { 
+    docId: z.string().describe("The ID of the document to analyze"),
+    tabName: z.string().describe("The name of the tab to analyze"),
+  },
+  ({ docId, tabName }) => ({
+    messages: [{
+      role: "user",
+      content: {
+        type: "text",
+        text: `Please analyze the content of the tab "${tabName}" in the document with ID ${docId}. Provide a summary of the tab's content, key points, and any suggestions for improvement specific to this tab.`
       }
     }]
   })

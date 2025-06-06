@@ -3,11 +3,21 @@
 This is a Model Context Protocol (MCP) server that allows you to connect to Google Docs through Claude. With this server, you can:
 
 - List all Google Docs in your Drive
-- Read the content of specific documents
+- Read the content of specific documents (including support for tabbed documents)
+- Read content from specific tabs by name
+- List all tabs in a document
 - Create new documents
 - Update existing documents
 - Search for documents
 - Delete documents
+
+## Google Docs Tabs Support
+
+This server fully supports the new [Google Docs tabs feature](https://developers.google.com/workspace/docs/api/how-tos/tabs). You can:
+- List all tabs in a document
+- Read content from a specific tab by name
+- Work with nested child tabs
+- Analyze individual tabs
 
 ## Prerequisites
 
@@ -121,12 +131,16 @@ To add new features to the MCP server:
 - `create-doc` - Creates a new Google Doc with the specified title and optional content
 - `update-doc` - Updates an existing Google Doc with new content (append or replace)
 - `search-docs` - Searches for Google Docs containing specific text
+- `read-doc` - Reads the content of a Google Doc (default/first tab only)
+- `read-doc-tab` - Reads the content from a specific tab by name in a Google Doc
+- `list-doc-tabs` - Lists all tabs in a Google Doc 
 - `delete-doc` - Deletes a Google Doc by ID
 
 ## Available Prompts
 
 - `create-doc-template` - Helps create a new document based on a specified topic and writing style
 - `analyze-doc` - Analyzes the content of a document and provides a summary
+- `analyze-doc-tab` - Analyzes the content of a specific tab in a document
 
 ## Usage Examples
 
@@ -136,9 +150,13 @@ Here are some example prompts you can use with Claude once the server is connect
 - "Create a new Google Doc titled 'Meeting Notes' with the content 'Topics to discuss: ...'"
 - "Update my document with ID '1abc123def456' to add this section at the end: ..."
 - "Search my Google Docs for any documents containing 'project proposal'"
+- "Read the content from document ID '1abc123def456'"
+- "List all tabs in document ID '1abc123def456'"
+- "Read content from the 'Transcript' tab in document ID '1abc123def456'"
 - "Delete the Google Doc with ID '1abc123def456'"
 - "Create a formal document about climate change"
 - "Analyze the content of document with ID '1abc123def456'"
+- "Analyze the 'Meeting Notes' tab in document ID '1abc123def456'"
 
 ## Troubleshooting
 
