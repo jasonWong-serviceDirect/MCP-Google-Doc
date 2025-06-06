@@ -2,6 +2,7 @@
 
 - **Tab support**: Read from specific document tabs by name
 - **Formatting preservation**: Advanced document editing with full text and paragraph styling support
+- **Structure-aware editing**: Heading-based and section-aware tools for precise document editing
 
 # Google Docs MCP Server
 
@@ -12,9 +13,27 @@ This is a Model Context Protocol (MCP) server that allows you to connect to Goog
 - Read content from specific tabs by name
 - List all tabs in a document
 - Create new documents
-- Update existing documents
+- Update existing documents with advanced formatting
 - Search for documents
 - Delete documents
+- **Structure-aware editing**: Find headings and edit content by document structure
+
+## Structure-Aware Editing Tools
+
+### Document Discovery
+- **`find-headings`** - Discover all headings in a document with their exact positions
+- Get structured view of document outline for precise editing
+
+### Heading-Based Editing
+- **`insert-content-after-heading`** - Insert content immediately after a specific heading
+- **`replace-section-content`** - Replace all content in a section between headings
+- **`append-to-section`** - Add content to the end of a specific section
+
+These tools enable precise, structure-aware editing without losing document formatting. Perfect for:
+- Adding content to specific sections
+- Updating particular parts of long documents
+- Maintaining document structure during edits
+- Preserving existing formatting while making targeted changes
 
 ## Google Docs Tabs Support
 
@@ -23,6 +42,7 @@ This server fully supports the new [Google Docs tabs feature](https://developers
 - Read content from a specific tab by name
 - Work with nested child tabs
 - Analyze individual tabs
+- Apply structure-aware editing to specific tabs
 
 ## Text Formatting Support
 
@@ -49,159 +69,74 @@ The server provides comprehensive text formatting capabilities:
 
 - Node.js v16.0.0 or later
 - Google Cloud project with the Google Docs API and Google Drive API enabled
-- OAuth 2.0 credentials for your Google Cloud project
 
 ## Setup
 
-1. Clone this repository and navigate to the project directory:
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/google-docs-mcp-server.git
+   cd google-docs-mcp-server
+   ```
 
-```bash
-git clone https://github.com/yourusername/MCP-Google-Doc.git
-cd MCP-Google-Doc
-```
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-2. Install dependencies:
+3. **Follow the [Google Cloud Console Setup](GOOGLE_SETUP_INSTRUCTIONS.md) to:**
+   - Create a Google Cloud project
+   - Enable the Google Docs and Drive APIs
+   - Create OAuth 2.0 credentials
+   - Download the `credentials.json` file
 
-```bash
-npm install
-```
+4. **Place your `credentials.json` file in the project root directory**
 
-3. Create an OAuth 2.0 client ID in the Google Cloud Console:
-   - Go to the [Google Cloud Console](https://console.cloud.google.com/)
-   - Create a new project or select an existing one
-   - Enable the Google Docs API and Google Drive API
-   - Go to "APIs & Services" > "Credentials"
-   - Click "Create Credentials" > "OAuth client ID"
-   - Select "Desktop app" for the application type
-   - Download the JSON file and save it as `credentials.json` in your project directory
+5. **Start the server:**
+   ```bash
+   npm start
+   ```
 
-   > **Important**: The `credentials.json` and `token.json` files contain sensitive information and are excluded from version control via `.gitignore`. Never commit these files to your repository.
-
-4. Build the project:
-
-```bash
-npm run build
-```
-
-5. Run the server:
-
-```bash
-npm start
-```
-
-The first time you run the server, it will prompt you to authenticate with Google. Follow the on-screen instructions to authorize the application. This will generate a `token.json` file that stores your access tokens.
-
-## Security Considerations
-
-- **Credential Security**: Both `credentials.json` and `token.json` contain sensitive information and should never be shared or committed to version control. They are already added to the `.gitignore` file.
-- **Token Refresh**: The application automatically refreshes the access token when it expires.
-- **Revoking Access**: If you need to revoke access, delete the `token.json` file and go to your [Google Account Security settings](https://myaccount.google.com/security) to remove the app from your authorized applications.
-
-## Connecting to Claude for Desktop
-
-To use this server with Claude for Desktop:
-
-1. Edit your Claude Desktop configuration file:
-   - On macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-   - On Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-
-2. Add the following to your configuration:
-
-```json
-{
-  "mcpServers": {
-    "googledocs": {
-      "command": "node",
-      "args": ["/absolute/path/to/build/server.js"]
-    }
-  }
-}
-```
-
-Replace `/absolute/path/to/build/server.js` with the actual path to your built server.js file.
-
-3. Restart Claude for Desktop.
-
-## Development
-
-### Project Structure
-
-```
-google-docs-integration/
-├── build/                # Compiled JavaScript files
-├── src/                  # TypeScript source code
-│   └── server.ts         # Main server implementation
-├── .gitignore            # Git ignore file
-├── credentials.json      # OAuth 2.0 credentials (not in version control)
-├── package.json          # Project dependencies and scripts
-├── README.md             # Project documentation
-├── token.json            # OAuth tokens (not in version control)
-└── tsconfig.json         # TypeScript configuration
-```
-
-### Adding New Features
-
-To add new features to the MCP server:
-
-1. Modify the `src/server.ts` file to implement new functionality
-2. Build the project with `npm run build`
-3. Test your changes by running `npm start`
-
-## Available Resources
-
-- `googledocs://list` - Lists all Google Docs in your Drive
-- `googledocs://{docId}` - Gets the content of a specific document by ID
+The first time you run the server, it will open your browser for Google OAuth authentication.
 
 ## Available Tools
 
-- `create-doc` - Creates a new Google Doc with the specified title and optional content
-- `update-doc` - Updates an existing Google Doc with new content (append or replace)
-- `update-doc-with-style` - Updates a Google Doc while preserving or applying specific formatting
-- `search-docs` - Searches for Google Docs containing specific text
-- `read-doc` - Reads the content of a Google Doc (default/first tab only)
-- `read-doc-tab` - Reads the content from a specific tab by name in a Google Doc
-- `list-doc-tabs` - Lists all tabs in a Google Doc 
-- `get-text-style` - Reads the formatting/style information at a specific location in a document
-- `delete-doc` - Deletes a Google Doc by ID
+### Document Management
+- `create-doc` - Create a new Google Doc
+- `search-docs` - Search for documents by content
+- `read-doc` - Read the full content of a document
+- `delete-doc` - Delete a document
+- `list-doc-tabs` - List all tabs in a document
+- `read-doc-tab` - Read content from a specific tab
 
-## Available Prompts
+### Content Editing
+- `update-doc` - Basic document updates (append or replace all)
+- `update-doc-with-style` - Advanced updates with full formatting control
+- `get-text-style` - Inspect formatting at specific locations
 
-- `create-doc-template` - Helps create a new document based on a specified topic and writing style
-- `analyze-doc` - Analyzes the content of a document and provides a summary
-- `analyze-doc-tab` - Analyzes the content of a specific tab in a document
+### Structure-Aware Editing
+- `find-headings` - Discover document structure and heading positions
+- `insert-content-after-heading` - Add content after specific headings
+- `replace-section-content` - Replace content between headings  
+- `append-to-section` - Add content to the end of sections
 
 ## Usage Examples
 
-Here are some example prompts you can use with Claude once the server is connected:
-
-- "Show me a list of all my Google Docs"
-- "Create a new Google Doc titled 'Meeting Notes' with the content 'Topics to discuss: ...'"
-- "Update my document with ID '1abc123def456' to add this section at the end: ..."
-- "Search my Google Docs for any documents containing 'project proposal'"
-- "Read the content from document ID '1abc123def456'"
-- "List all tabs in document ID '1abc123def456'"
-- "Read content from the 'Transcript' tab in document ID '1abc123def456'"
-- "Delete the Google Doc with ID '1abc123def456'"
-- "Create a formal document about climate change"
-- "Analyze the content of document with ID '1abc123def456'"
-- "Analyze the 'Meeting Notes' tab in document ID '1abc123def456'"
-- "Add this text to my document with bold formatting and blue color"
-- "Update my document while preserving the existing font and style"
-- "Check what formatting is applied to the text at position 100 in my document"
-
-### Advanced Formatting Examples
-
-**Adding styled text:**
+### Basic Document Operations
 ```
-Add "Important Notice" to document 123 with bold text, red color, and center alignment
+Create a new document titled "Meeting Notes"
+Search for documents containing "quarterly report"
+Read the document with ID "abc123"
 ```
 
-**Preserving existing formatting:**
+### Structure-Aware Editing
 ```
-Insert "Additional content" at position 50 in document 123 while keeping current formatting
+Find all headings in document ID "abc123"
+Insert "New bullet points here" after the "Action Items" heading
+Replace the content in the "Summary" section with updated text
+Append additional notes to the "Conclusion" section
 ```
 
-**Applying multiple styles:**
+### Advanced Formatting
 ```
 Update document 123 with "Executive Summary" using:
 - Font: Arial, size 16
@@ -209,6 +144,28 @@ Update document 123 with "Executive Summary" using:
 - Blue text color
 - Double line spacing
 ```
+
+### Working with Tabs
+```
+List all tabs in document "abc123"
+Read content from the "Appendix" tab
+Insert content after "Results" heading in the "Data" tab
+```
+
+## Best Practices for Structure-Aware Editing
+
+1. **Use `find-headings` first** to understand document structure
+2. **Leverage section-based tools** instead of manual index calculations
+3. **Preserve headings** when replacing section content
+4. **Use consistent heading styles** for reliable structure detection
+5. **Test with `read-doc` after edits** to verify results
+
+The structure-aware tools make it safe to edit complex documents without breaking formatting or losing content. They work by:
+
+- Analyzing document headings and structure
+- Using semantic content boundaries instead of character positions
+- Preserving existing formatting during edits
+- Supporting both tabbed and regular documents
 
 ## Troubleshooting
 
