@@ -651,31 +651,7 @@ function convertDocToMarkdown(docContent: any): string {
   return markdown.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/**
- * In-Memory Editing Component
- * Allows AI or user to operate on the Markdown string
- */
-function editMarkdownContent(markdownString: string, instruction: string): string {
-  // This is a placeholder for AI-powered editing
-  // In a real implementation, this would use an AI model to modify the markdown
-  // For now, we'll just return the original content with a note
-  
-  const lines = markdownString.split('\n');
-  let editedContent = markdownString;
-  
-  // Basic instruction handling (can be expanded)
-  if (instruction.toLowerCase().includes('add heading')) {
-    const headingMatch = instruction.match(/add heading[:\s]+"([^"]+)"/i);
-    if (headingMatch) {
-      const newHeading = headingMatch[1];
-      editedContent = `# ${newHeading}\n\n${markdownString}`;
-    }
-  } else if (instruction.toLowerCase().includes('remove empty lines')) {
-    editedContent = markdownString.replace(/\n\s*\n/g, '\n\n');
-  }
-  
-  return editedContent;
-}
+
 
 /**
  * Enhanced Markdown Parser Component
@@ -918,21 +894,25 @@ async function writeMarkdownToGoogleDoc(docId: string, markdownString: string, t
       documentLength = baseIndex + Math.max(0, textContent.length - 1);
     }
     
-    const requests: any[] = [];
-    
-    // Clear existing content (except title)
+    // Step 1: Clear existing content (except title) in a separate operation
     if (documentLength > baseIndex) {
-      requests.push({
-        deleteContentRange: {
-          range: {
-            startIndex: baseIndex,
-            endIndex: documentLength,
-            ...(tabId && { tabId }),
-          },
+      await docsClient.documents.batchUpdate({
+        documentId,
+        requestBody: {
+          requests: [{
+            deleteContentRange: {
+              range: {
+                startIndex: baseIndex,
+                endIndex: documentLength,
+                ...(tabId && { tabId }),
+              },
+            },
+          }],
         },
       });
     }
     
+    // Step 2: Insert new content with formatting in a separate operation
     // Parse markdown and create requests
     const markdownRequests = parseMarkdownToDocRequests(markdownString, baseIndex, tabId);
     
@@ -945,22 +925,30 @@ async function writeMarkdownToGoogleDoc(docId: string, markdownString: string, t
         if (request.updateParagraphStyle && request.updateParagraphStyle.range) {
           request.updateParagraphStyle.range.tabId = tabId;
         }
+        if (request.updateTextStyle && request.updateTextStyle.range) {
+          request.updateTextStyle.range.tabId = tabId;
+        }
       });
     }
     
-    requests.push(...markdownRequests);
+    // Execute markdown insertion and formatting requests
+    if (markdownRequests.length > 0) {
+      await docsClient.documents.batchUpdate({
+        documentId,
+        requestBody: {
+          requests: markdownRequests,
+        },
+      });
+    }
     
-    // Execute all requests in a single batch
-    await docsClient.documents.batchUpdate({
-      documentId,
-      requestBody: {
-        requests,
-      },
-    });
-    
-    return `Successfully updated document with ${markdownRequests.length / 2} elements`;
+    return `Successfully updated document with ${Math.floor(markdownRequests.length / 2)} elements`;
   } catch (error) {
-    throw new Error(`Failed to write markdown to document: ${error}`);
+    if (error instanceof Error) {
+      console.error("Full error:", error.stack || error.message);
+    } else {
+      console.error("Non-standard error:", error);
+    }
+    throw new Error(`Failed to write markdown to document: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -1034,42 +1022,9 @@ server.tool(
   }
 );
 
-// Tool 2: Edit markdown content
-server.tool(
-  "edit-markdown-content",
-  {
-    markdownString: z.string().describe("The markdown content to edit"),
-    instruction: z.string().describe("Instruction for how to edit the content"),
-  },
-  async ({ markdownString, instruction }) => {
-    try {
-      // Process the markdown content based on the instruction
-      const editedMarkdown = editMarkdownContent(markdownString, instruction);
-      
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Markdown content edited successfully!\n\nInstruction: ${instruction}\n\n--- EDITED MARKDOWN ---\n${editedMarkdown}\n--- END MARKDOWN ---`,
-          },
-        ],
-      };
-    } catch (error) {
-      console.error("Error editing markdown content:", error);
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error editing markdown content: ${error}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  }
-);
 
-// Tool 3: Write markdown to document
+
+// Tool 2: Write markdown to document
 server.tool(
   "write-markdown-to-doc",
   {
@@ -1110,6 +1065,7 @@ server.tool(
     }
   }
 );
+
 
 // Connect to the transport and start the server
 async function main() {
